@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BOSS 血量與門檻計算機</title>
+    <style>
+        :root {
+            --primary-color: #e74c3c; /* BOSS 紅 */
+            --secondary-color: #2c3e50; /* 深藍背景 */
+            --accent-color: #f1c40f; /* 重點黃 */
+            --text-color: #ecf0f1;
+            --card-bg: #34495e;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--secondary-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            background-color: var(--card-bg);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            max-width: 500px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--accent-color);
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        select, input {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: none;
+            background-color: #2c3e50;
+            color: white;
+            font-size: 16px;
+            box-sizing: border-box; /* 確保 padding 不會撐開寬度 */
+            border: 1px solid #555;
+        }
+
+        select:focus, input:focus {
+            outline: 2px solid var(--accent-color);
+        }
+
+        .result-area {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #555;
+        }
+
+        .result-card {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .result-label {
+            font-size: 0.9em;
+            color: #bdc3c7;
+        }
+
+        .result-value {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+
+        .hp-value { color: var(--primary-color); }
+        .threshold-value { color: #2ecc71; } /* 綠色代表通過 */
+
+        .note {
+            font-size: 0.8em;
+            color: #95a5a6;
+            text-align: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>⚔️ BOSS 討伐計算機</h1>
+
+    <div class="form-group">
+        <label for="bossSelect">選擇 BOSS</label>
+        <select id="bossSelect">
+            </select>
+    </div>
+
+    <div class="form-group">
+        <label for="playerCount">參與人數 (人)</label>
+        <input type="number" id="playerCount" value="1" min="1" max="100">
+    </div>
+
+    <div class="result-area">
+        <div class="result-card">
+            <div>
+                <div class="result-label">BOSS 總血量 (HP)</div>
+                <div class="result-value hp-value" id="totalHpDisplay">0</div>
+            </div>
+        </div>
+
+        <div class="result-card" style="border: 1px solid #2ecc71;">
+            <div>
+                <div class="result-label">通關門檻 (2%)</div>
+                <div class="result-value threshold-value" id="thresholdDisplay">0</div>
+            </div>
+            <div style="font-size: 24px;">🎯</div>
+        </div>
+    </div>
+
+    <div class="note">
+        * 血量隨人數動態加成，門檻為總血量的 2%
+    </div>
+</div>
+
+<script>
+    // --- 1. 模擬資料庫 (之後這裡可以換成真實的 DB 資料) ---
+    const bossDatabase = [
+        { id: 1, name: "地獄火龍 (Lv.10)", baseHp: 100000, scaleFactor: 1.5 }, // scaleFactor 是假設多人難度係數
+        { id: 2, name: "深海巨怪 (Lv.30)", baseHp: 500000, scaleFactor: 1.2 },
+        { id: 3, name: "虛空領主 (Lv.99)", baseHp: 10000000, scaleFactor: 1.0 } // 假設這隻王血量不隨人數膨脹那麼多
+    ];
+
+    // --- 2. DOM 元素選取 ---
+    const bossSelect = document.getElementById('bossSelect');
+    const playerCountInput = document.getElementById('playerCount');
+    const totalHpDisplay = document.getElementById('totalHpDisplay');
+    const thresholdDisplay = document.getElementById('thresholdDisplay');
+
+    // --- 3. 初始化頁面 ---
+    function init() {
+        // 填充下拉選單
+        bossDatabase.forEach(boss => {
+            const option = document.createElement('option');
+            option.value = boss.id;
+            option.textContent = boss.name;
+            bossSelect.appendChild(option);
+        });
+
+        // 綁定事件：當選擇改變或數字改變時，重新計算
+        bossSelect.addEventListener('change', calculate);
+        playerCountInput.addEventListener('input', calculate);
+
+        // 第一次載入先算一次
+        calculate();
+    }
+
+    // --- 4. 核心計算邏輯 ---
+    function calculate() {
+        // 取得當前選擇的 Boss ID
+        const selectedId = parseInt(bossSelect.value);
+        const boss = bossDatabase.find(b => b.id === selectedId);
+        
+        // 取得人數 (防止輸入小於 1)
+        let players = parseInt(playerCountInput.value);
+        if (players < 1 || isNaN(players)) players = 1;
+
+        // --- 血量公式區 (你可以根據需求修改這裡) ---
+        // 目前假設：總血量 = 基礎血量 * 人數 * 難度係數
+        // 如果只是單純加法，可以改成: baseHp * players
+        const currentTotalHp = Math.round(boss.baseHp * players * boss.scaleFactor);
+
+        // --- 門檻公式區 ---
+        // 門檻 = 總血量 * 2%
+        const threshold = Math.round(currentTotalHp * 0.02);
+
+        // 更新畫面 (加上千分位逗號)
+        totalHpDisplay.textContent = currentTotalHp.toLocaleString();
+        thresholdDisplay.textContent = threshold.toLocaleString();
+    }
+
+    // 啟動程式
+    init();
+</script>
+
+</body>
+</html>
